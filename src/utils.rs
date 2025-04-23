@@ -147,7 +147,6 @@ impl Proof {
 
     pub fn verify(&self, root_hash: &Hash, leaf: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let leaf_hash = leaf_hash::<Sha256>(leaf);
-        println!("leaf_hash: {:?}", String::from_utf8(hex::encode(leaf_hash)));
         if self.leaf_hash != leaf_hash {
             return Err(format!(
                 "invalid leaf hash: wanted {:?} got {:?}",

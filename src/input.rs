@@ -238,18 +238,14 @@ impl InputDataFetcher {
             .get_validator_set_from_number(prev_block_number + 1)
             .await;
         let nb_validators = next_block_validators.len();
-
         let next_block_validators =
             get_validator_data_from_block(&next_block_validators, &next_block_signed_header);
-
         let next_chain_id = next_block_signed_header.header.chain_id.clone();
-
         let next_block_chain_id_proof = get_merkle_proof(
             &next_block_signed_header.header,
             CHAIN_ID_INDEX as u64,
             next_chain_id.clone().encode_vec(),
         );
-
         // Extend the chain id to the maximum encoded length
         let mut extended_chain_id = next_chain_id.clone().encode_vec();
         extended_chain_id.resize(PROTOBUF_CHAIN_ID_SIZE_BYTES, 0u8);

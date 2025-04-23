@@ -251,11 +251,6 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         &validator_byte_lengths,
         step_inputs.nb_validators as u64,
     );
-    println!("computed_validators_hash: {:?}", computed_validators_hash);
-    println!(
-        "step_inputs.next_header.validators_hash: {:?}",
-        step_inputs.next_header.validators_hash.as_bytes()
-    );
     // Verify computed hash matches the header's validators hash
     if computed_validators_hash != step_inputs.next_header.validators_hash.as_bytes() {
         return Err("Computed validators hash does not match header's validators hash".to_string());
@@ -379,11 +374,10 @@ pub fn marshal_tendermint_validator(pubkey: &[u8], voting_power: &u64) -> Vec<u8
     res
 }
 
-fn hash_validator_leaf(validator: &[u8], validator_byte_length: u64) -> [u8; 32] {
+fn hash_validator_leaf(validator: &[u8]) -> [u8; 32] {
     // The encoding is as follows in bytes: 0x00 || validatorBytes
     let mut validator_bytes = vec![0u8]; // Leaf node prefix
     validator_bytes.extend_from_slice(validator);
-    validator_bytes.resize(64, 0u8);
     let mut hasher = Sha256::new();
     hasher.update(&validator_bytes);
     hasher.finalize().into()
@@ -396,12 +390,8 @@ fn hash_validator_set<const VALIDATOR_SET_SIZE_MAX: usize>(
 ) -> Vec<u8> {
     let mut validator_leaf_hashes = Vec::new();
     for i in 0..VALIDATOR_SET_SIZE_MAX {
-        validator_leaf_hashes.push(hash_validator_leaf(
-            &validators[i],
-            validator_byte_lengths[i],
-        ))
+        validator_leaf_hashes.push(hash_validator_leaf(&validators[i]))
     }
-    println!("validator_leaf_hashes: {:?}", validator_leaf_hashes);
     assert_eq!(validators.len(), VALIDATOR_SET_SIZE_MAX);
     assert_eq!(validator_byte_lengths.len(), VALIDATOR_SET_SIZE_MAX);
     let mut circuit_builder = CircuitBuilder {};
@@ -464,13 +454,11 @@ impl TendermintMerkleTree for CircuitBuilder {
         leaf: Vec<u8>,
     ) -> Vec<u8> {
         let mut hash_so_far = leaf;
-
         for i in 0..PROOF_DEPTH {
             let aunt = proof[i].clone();
             let path_index = path_indices[i];
             let left_hash_pair = self.inner_hash(&hash_so_far, &aunt);
             let right_hash_pair = self.inner_hash(&aunt, &hash_so_far);
-
             if path_index {
                 hash_so_far = right_hash_pair;
             } else {
@@ -532,26 +520,20 @@ impl TendermintMerkleTree for CircuitBuilder {
     ) -> (Vec<Vec<u8>>, Vec<bool>) {
         let zero = false;
         let one = true;
-
         let mut new_merkle_hashes = Vec::new();
         let mut new_merkle_hash_enabled = Vec::new();
-
         for i in (0..merkle_hashes.len()).step_by(2) {
             let both_nodes_enabled = merkle_hash_enabled[i] && merkle_hash_enabled[i + 1];
-
             let first_node_disabled = !merkle_hash_enabled[i];
             let second_node_disabled = !merkle_hash_enabled[i + 1];
             let both_nodes_disabled = first_node_disabled && second_node_disabled;
-
             // Calculuate the inner hash.
             let inner_hash = self.inner_hash(&merkle_hashes[i], &merkle_hashes[i + 1]);
-
             if both_nodes_enabled {
                 new_merkle_hashes.push(inner_hash);
             } else {
                 new_merkle_hashes.push(merkle_hashes[i].clone());
             }
-
             // Set the inner node one level up to disabled if both nodes are disabled.
             if both_nodes_disabled {
                 new_merkle_hash_enabled.push(zero);
@@ -583,7 +565,6 @@ impl TendermintMerkleTree for CircuitBuilder {
         // Pad the leaves to be a power of 2.
         let mut current_nodes = leaf_hashes;
         current_nodes.resize(padded_nb_leaves as usize, empty_bytes.to_vec());
-
         // Whether to treat the validator as empty.
         // Pad the enabled array to be a power of 2.
         let mut current_node_enabled = Vec::new();
@@ -619,13 +600,7 @@ impl TendermintMerkleTree for CircuitBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        types::types::InclusionProof,
-        verification::verification::{
-            CircuitBuilder, MerkleInclusionProofVariable, marshal_int64_varint,
-            marshal_tendermint_validator,
-        },
-    };
+    use crate::verification::verification::{marshal_int64_varint, marshal_tendermint_validator};
 
     #[test]
     fn test_marshal_int64_varint() {
