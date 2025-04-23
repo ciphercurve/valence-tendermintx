@@ -20,7 +20,7 @@ This document provides a comprehensive security comparison between two implement
 
 ### 0. What is being verified
 
-*Skip Circuit*:
+*Skip Verification*:
 - the trusted validator set against the trusted validator hash
 - validator hash proof against trusted header
 - target block signatures
@@ -33,8 +33,14 @@ This document provides a comprehensive security comparison between two implement
 > trusted validator set from the previous block will behave honestly
 > The assumption is that if and only if 1/3rd + of the verifier set has not changed,
 > then we continue to trust it.
+>
+> If enough of our trusted validators signed the target block along with others, 
+> then we can trust those other validators (at least temporarily).
+>
+> Don't use the Skip Circuit if you dislike this premise. 
+> The most trustless verification is going step-by-step. 
 
-*Step Circuit*
+*Step Verification*
 - the next valifdator set against the next validator hash
 - the previous header hash proof
 - the previous validator hash proof
