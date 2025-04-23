@@ -6,7 +6,7 @@
 >
 > Use at your own Risk!
 >
-> Currently missing Validator Hash Computation (wip)
+> Currently missing the message hash verification
 
 ## Overview
 
