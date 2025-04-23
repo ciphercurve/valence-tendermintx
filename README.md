@@ -6,6 +6,11 @@
 > This is not the official TendermintX implementation and 
 > all use is at own risk!
 
+>[!NOTE]
+> Currently the skip range is set to be unlimited.
+> Limiting it probably makes sense but this is not currently a priority.
+
+
 This document provides a comprehensive security comparison between two implementations of Tendermint light client verification:
 
 1. The reference implementation [TendermintX](https://github.com/succinctlabs/tendermintx)
