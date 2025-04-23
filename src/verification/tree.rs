@@ -14,7 +14,7 @@ pub trait TendermintMerkleTree {
         leaf: Vec<u8>,
     ) -> Vec<u8>;
 
-    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize, const LEAF_SIZE_BYTES: usize>(
+    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize>(
         &mut self,
         inclusion_proof: &MerkleInclusionProofVariable,
         path_indices: Vec<bool>,
@@ -71,7 +71,7 @@ impl TendermintMerkleTree for TreeBuilder {
         hash_so_far
     }
 
-    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize, const LEAF_SIZE_BYTES: usize>(
+    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize>(
         &mut self,
         inclusion_proof: &MerkleInclusionProofVariable,
         path_indices: Vec<bool>,

@@ -306,13 +306,13 @@ impl InputDataFetcher {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use tendermint_proto::Protobuf;
-
     use crate::{
         types::conversion::get_validator_data_from_block,
         verification::verification::{get_merkle_proof, verify_merkle_proof},
     };
+    use tendermint_proto::Protobuf;
 
+    #[cfg(feature = "local-tests")]
     #[tokio::test]
     async fn test_get_signed_vote() {
         let mut data_fetcher = super::InputDataFetcher {
@@ -330,6 +330,7 @@ pub(crate) mod tests {
         let _ = get_validator_data_from_block(&target_block_validator_set, &target_signed_header);
     }
 
+    #[cfg(feature = "local-tests")]
     #[tokio::test]
     async fn test_find_header_with_nonzero_round() {
         let data_fetcher = super::InputDataFetcher {

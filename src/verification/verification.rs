@@ -5,8 +5,8 @@ use tendermint::merkle::HASH_SIZE;
 use tendermint_proto::Protobuf;
 
 use crate::consts::{
-    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES, VALIDATOR_BYTE_LENGTH_MAX,
-    VALIDATOR_SET_SIZE_MAX,
+    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, NEXT_VALIDATORS_HASH_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES,
+    VALIDATOR_BYTE_LENGTH_MAX, VALIDATOR_SET_SIZE_MAX,
 };
 use crate::input::get_path_indices;
 use crate::types::conversion::ValidatorVariable;
@@ -238,8 +238,33 @@ pub fn verify_step(step_inputs: &StepInputs, prev_header_hash: Vec<u8>) -> Resul
         step_inputs.next_block_last_block_id_proof.leaf[2..2 + HASH_SIZE].to_vec();
     assert_eq!(prev_header_hash, prev_hash_header);
 
-    // verify the previous validators hash
-    todo!("Verify that the new header contains the previous validators hash");
+    // root of validator hash proof must match previous header hash
+    let mut tree_builder = TreeBuilder {};
+    let computed_prev_header_root = tree_builder.get_root_from_merkle_proof::<HEADER_PROOF_DEPTH>(
+        &MerkleInclusionProofVariable {
+            proof: step_inputs
+                .prev_block_next_validators_hash_proof
+                .proof
+                .clone(),
+            leaf: step_inputs
+                .prev_block_next_validators_hash_proof
+                .leaf
+                .clone(),
+        },
+        step_inputs
+            .prev_block_next_validators_hash_proof
+            .path_indices
+            .clone(),
+    );
+    assert_eq!(computed_prev_header_root, prev_hash_header);
+
+    // assert the validator hash was actually under the previous header
+    let extracted_prev_header_next_validators_hash =
+        step_inputs.prev_block_next_validators_hash_proof.leaf[2..2 + HASH_SIZE].to_vec();
+    assert_eq!(
+        extracted_prev_header_next_validators_hash,
+        step_inputs.next_header.validators_hash.as_bytes()
+    );
 
     // verify validator signatures and voting power
     let mut total_voting_power: u64 = 0;
@@ -448,4 +473,23 @@ pub fn verify_validator_set(
     );
 
     computed_validators_hash == root
+}
+
+const HEADER_PROOF_DEPTH: usize = 4;
+fn get_path_to_leaf(index: usize) -> Vec<bool> {
+    let false_t = false;
+    let true_t = true;
+
+    // The path to the leaf in a Tendermint header.
+    let mut path = Vec::new();
+    let mut curr_idx = index;
+    for _ in 0..HEADER_PROOF_DEPTH {
+        if curr_idx % 2 == 0 {
+            path.push(false_t);
+        } else {
+            path.push(true_t);
+        }
+        curr_idx /= 2;
+    }
+    path
 }
