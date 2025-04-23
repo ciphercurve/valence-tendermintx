@@ -5,6 +5,8 @@
 > and has not been audited (yet)!
 >
 > Use at your own Risk!
+>
+> Currently missing Validator Hash Computation (wip)
 
 ## Overview
 
