@@ -43,6 +43,16 @@ fn verify_prev_header_next_validators_hash(
     prev_header: &TendermintHashVariable,
     prev_header_next_validators_hash_proof: &HashInclusionProofVariable,
 ) {
+    // verify the last block id in the next block
+    if !verify_merkle_proof(
+        next_header_hash.as_bytes().try_into().unwrap(),
+        &step_inputs.next_block_last_block_id_proof.leaf,
+        &step_inputs.next_block_last_block_id_proof.proof,
+        &step_inputs.next_block_last_block_id_proof.path_indices,
+    ) {
+        return Err("Invalid next block last block ID proof".to_string());
+    }
+    
     // Verify the next validators hash proof matches the previous header
     let next_val_hash_path = self.get_path_to_leaf(NEXT_VALIDATORS_HASH_INDEX);
     let computed_prev_header_root = self.get_root_from_merkle_proof(
