@@ -36,39 +36,6 @@ fn verify_prev_header_in_header(
         last_block_id_proof.leaf[2..2 + HASH_SIZE].into();
     self.assert_is_equal(prev_header, extracted_prev_header_hash);
 }
-
-fn verify_prev_header_next_validators_hash(
-    &mut self,
-    new_validators_hash: TendermintHashVariable,
-    prev_header: &TendermintHashVariable,
-    prev_header_next_validators_hash_proof: &HashInclusionProofVariable,
-) {
-    // verify the last block id in the next block
-    if !verify_merkle_proof(
-        next_header_hash.as_bytes().try_into().unwrap(),
-        &step_inputs.next_block_last_block_id_proof.leaf,
-        &step_inputs.next_block_last_block_id_proof.proof,
-        &step_inputs.next_block_last_block_id_proof.path_indices,
-    ) {
-        return Err("Invalid next block last block ID proof".to_string());
-    }
-    
-    // Verify the next validators hash proof matches the previous header
-    let next_val_hash_path = self.get_path_to_leaf(NEXT_VALIDATORS_HASH_INDEX);
-    let computed_prev_header_root = self.get_root_from_merkle_proof(
-        prev_header_next_validators_hash_proof,
-        &next_val_hash_path,
-    );
-    self.assert_is_equal(computed_prev_header_root, *prev_header);
-
-    // Verify the new validators hash matches the previous header's next validators hash
-    let extracted_prev_header_next_validators_hash =
-        prev_header_next_validators_hash_proof.leaf[2..2 + HASH_SIZE].into();
-    self.assert_is_equal(
-        new_validators_hash,
-        extracted_prev_header_next_validators_hash,
-    );
-}
 ```
 
 **This Implementation (Runtime)**:
@@ -103,7 +70,7 @@ pub fn verify_step(step_inputs: &StepInputs, prev_header_hash: Vec<u8>) -> Resul
     // Verify the new validators hash matches
     let extracted_prev_header_next_validators_hash =
         step_inputs.prev_block_next_validators_hash_proof.leaf[2..2 + HASH_SIZE].to_vec();
-    let new_validators_hash = step_inputs.next_header_validators_hash_proof.leaf[2..2 + HASH_SIZE].to_vec();
+    let new_validators_hash = step_inputs.next_header.validators_hash.as_bytes().to_vec();
     assert_eq!(new_validators_hash, extracted_prev_header_next_validators_hash);
 
     Ok(())
@@ -150,23 +117,58 @@ fn verify_voting_threshold<const VALIDATOR_SET_SIZE_MAX: usize>(
 
 **This Implementation (Runtime)**:
 ```rust
-pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
+pub fn verify_skip(skip_inputs: &SkipInputs, trusted_header_hash: Vec<u8>) -> Result<(), String> {
+    // Verify validator signatures and voting power
     let mut total_voting_power: u64 = 0;
     let mut signed_voting_power: u64 = 0;
-    
+    let mut signed_validators_from_trusted: u64 = 0;
+    let trusted_validator_addresses: std::collections::HashSet<_> = skip_inputs
+        .trusted_block_validators_hash_fields
+        .iter()
+        .map(|v| v.pubkey.clone())
+        .collect();
+        
     for validator in &skip_inputs.target_block_validators {
         if validator.signed {
+            let message = &validator.message[..validator.message_byte_length as usize];
+            let mut signature_bytes = Vec::new();
+            signature_bytes.extend_from_slice(&validator.signature.r);
+            signature_bytes.extend_from_slice(&validator.signature.s);
+
+            let signature = ed25519_dalek::Signature::from_bytes(&signature_bytes)
+                .map_err(|_| "Invalid signature format")?;
+            let public_key = ed25519_dalek::PublicKey::from_bytes(&validator.pubkey)
+                .map_err(|_| "Invalid public key format")?;
+
+            public_key
+                .verify_strict(message, &signature)
+                .map_err(|_| "Invalid signature for validator")?;
+
             signed_voting_power += validator.voting_power;
+
+            if trusted_validator_addresses.contains(&validator.pubkey) {
+                signed_validators_from_trusted += validator.voting_power;
+            }
         }
         total_voting_power += validator.voting_power;
     }
     
+    // more than 2/3 total votes
     if signed_voting_power * 3 <= total_voting_power * 2 {
         return Err(format!(
             "Insufficient voting power signed the target block. Got {}/{} voting power",
             signed_voting_power, total_voting_power
         ));
     }
+    
+    // more than 1/3 trusted votes
+    if signed_validators_from_trusted * 3 < signed_voting_power {
+        return Err(format!(
+            "Insufficient validators from trusted block signed the target block. Got {}/{} voting power from trusted validators",
+            signed_validators_from_trusted, signed_voting_power
+        ));
+    }
+    
     Ok(())
 }
 ```
@@ -176,65 +178,59 @@ Both implementations:
 - Track signed voting power
 - Enforce the 2/3 threshold requirement
 - Handle validator set changes correctly
+- Verify validator signatures using ed25519
+- Track voting power from trusted validators
 
-### 3. Skip Verification
+### 3. Input Handling and Data Fetching
 
-Both implementations ensure skipped blocks maintain security through validator set overlap:
-
-**Reference Implementation (Circuit)**:
-```rust
-fn verify_trusted_validators<const VALIDATOR_SET_SIZE_MAX: usize>(
-    &mut self,
-    validators: &ArrayVariable<ValidatorVariable, VALIDATOR_SET_SIZE_MAX>,
-    trusted_header: TendermintHashVariable,
-    trusted_validator_hash_proof: &HashInclusionProofVariable,
-    trusted_validator_hash_fields: &ArrayVariable<ValidatorHashFieldVariable, VALIDATOR_SET_SIZE_MAX>,
-    trusted_nb_enabled_validators: Variable,
-) {
-    // ... proof verification ...
-    let threshold_numerator = self.constant::<U64Variable>(1);
-    let threshold_denominator = self.constant::<U64Variable>(3);
-    self.verify_voting_threshold::<VALIDATOR_SET_SIZE_MAX>(
-        &trusted_vp,
-        trusted_nb_enabled_validators,
-        &threshold_numerator,
-        &threshold_denominator,
-        &trusted_validator_signed_on_target_header,
-    );
-}
-```
+The implementation includes a robust input handling system:
 
 **This Implementation (Runtime)**:
 ```rust
-pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
-    let mut signed_validators_from_trusted: u64 = 0;
-    let trusted_validator_addresses: std::collections::HashSet<_> = skip_inputs
-        .trusted_block_validators_hash_fields
-        .iter()
-        .map(|v| v.pubkey.clone())
-        .collect();
-        
-    for validator in &skip_inputs.target_block_validators {
-        if validator.signed && trusted_validator_addresses.contains(&validator.pubkey) {
-            signed_validators_from_trusted += validator.voting_power;
-        }
+pub struct InputDataFetcher {
+    pub urls: Vec<String>,
+}
+
+impl InputDataFetcher {
+    pub async fn get_skip_inputs<const VALIDATOR_SET_SIZE_MAX: usize>(
+        &mut self,
+        trusted_block_number: u64,
+        trusted_block_hash: Vec<u8>,
+        target_block_number: u64,
+    ) -> SkipInputs {
+        // Fetch validator sets and headers
+        let trusted_block_validator_set = self
+            .get_validator_set_from_number(trusted_block_number)
+            .await;
+        let target_block_validator_set = self
+            .get_validator_set_from_number(target_block_number)
+            .await;
+
+        let target_signed_header = self
+            .get_signed_header_from_number(target_block_number)
+            .await;
+        let trusted_signed_header = self
+            .get_signed_header_from_number(trusted_block_number)
+            .await;
+
+        // Generate proofs and prepare inputs
+        let target_block_chain_id_proof = get_merkle_proof(
+            &target_signed_header.header(),
+            CHAIN_ID_INDEX as u64,
+            target_signed_header.header().chain_id.clone().encode_vec(),
+        );
+
+        // ... additional proof generation and input preparation ...
     }
-    
-    if signed_validators_from_trusted * 3 < signed_voting_power {
-        return Err(format!(
-            "Insufficient validators from trusted block signed the target block. Got {}/{} voting power from trusted validators",
-            signed_validators_from_trusted, signed_voting_power
-        ));
-    }
-    Ok(())
 }
 ```
 
-Both implementations:
-- Track validators from the trusted block
-- Verify >1/3 voting power from trusted validators
-- Handle validator set changes during skips
-- Maintain the same security guarantees for skip verification
+Key features:
+- Asynchronous data fetching from multiple RPC endpoints
+- Robust error handling and retries
+- Efficient proof generation
+- Support for both step and skip verification
+- Proper handling of validator set changes
 
 ## Implementation Differences
 
@@ -246,53 +242,28 @@ The reference implementation (`verification-comparison.rs`) is implemented as a 
 
 - **Reference Implementation**: Uses a more formalized approach with explicit path indices and depth parameters
 - **This Implementation**: Uses a more practical approach with helper functions for proof generation and verification
+- Added caching for proof generation to improve performance
 
 ### 3. Validator Set Verification
 
 - **Reference Implementation**: More strictly typed with explicit size constraints and array bounds
 - **This Implementation**: More flexible with dynamic sizing and runtime checks
+- Added ed25519 signature verification
+- Enhanced tracking of trusted validator voting power
 
 ### 4. Error Handling
 
 - **Reference Implementation**: Uses circuit assertions and boolean constraints
 - **This Implementation**: Uses Rust's Result type with detailed error messages
+- Added comprehensive error handling for network requests and data validation
 
 ## Security Considerations
 
-1. **Circuit Implementation Advantages**
-   - Provides cryptographic guarantees through zero-knowledge proofs
-   - Formal verification of constraints is possible
-   - No reliance on runtime environment security
-
-2. **Runtime Implementation Advantages**
-   - More flexible handling of edge cases
-   - Better performance for direct verification
-   - More detailed error reporting
-   - Easier to audit and maintain
-
-3. **Shared Security Properties**
-   - Both maintain the core Tendermint security model
-   - Both properly verify validator signatures
-   - Both enforce the 2/3 voting power requirement
-   - Both handle skip verification with proper validator set overlap checks
+1. **Signature Verification**: The implementation uses ed25519_dalek for strict signature verification
+2. **Voting Power Thresholds**: Enforces both 2/3 total voting power and 1/3 trusted validator voting power requirements
+3. **Chain Continuity**: Ensures proper chain continuity through header hash verification
+4. **Validator Set Changes**: Properly handles validator set changes during skips
+5. **Network Security**: Supports multiple RPC endpoints for redundancy and security
 
 ## Running Tests
-To verify a light client proof for a `step`:
-
-```shell
-cargo test test_verify_step
-```
-
-To verify a light client proof for a `skip`:
-
-```shell
-carg test test_verify_skip
-```
-
-See [main.rs](src/main.rs) for details
-
-## Conclusion
-
-This implementation (`verification.rs`) closely follows the security model of the reference implementation (`verification-comparison.rs`) while providing a more practical runtime verification system. The key security guarantees are preserved, though the trust model differs due to the circuit vs runtime implementation choice.
-
-This implementation is suitable for direct verification in a trusted environment, while the reference implementation is better suited for zero-knowledge proof generation. Both implementations maintain the core security properties required for Tendermint light client verification.
+To verify a light client proof for a `

@@ -1,5 +1,5 @@
 mod consts;
-mod input;
+pub mod input;
 pub mod types;
 pub mod utils;
 pub mod verification;
@@ -28,7 +28,7 @@ mod tests {
         let trusted_height = 28122519u64;
         let mut input_data_fetcher = input::InputDataFetcher::default();
         let step_inputs = input_data_fetcher
-            .get_step_inputs::<MAX_VALIDATOR_SET_SIZE>(trusted_height, trusted_header.to_vec())
+            .get_step_inputs::<MAX_VALIDATOR_SET_SIZE>(trusted_height)
             .await;
         verify_step(&step_inputs, trusted_header.to_vec()).unwrap();
     }

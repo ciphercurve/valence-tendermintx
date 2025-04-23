@@ -6,8 +6,8 @@ use tendermint::validator::Info;
 use tendermint_proto::Protobuf;
 
 use crate::consts::{
-    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, LAST_BLOCK_ID_INDEX, NEXT_VALIDATORS_HASH_INDEX,
-    PROTOBUF_CHAIN_ID_SIZE_BYTES, VALIDATORS_HASH_INDEX,
+    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, LAST_BLOCK_ID_INDEX, MAX_NUM_RETRIES,
+    NEXT_VALIDATORS_HASH_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES, VALIDATORS_HASH_INDEX,
 };
 use crate::types::conversion::{get_validator_data_from_block, validator_hash_field_from_block};
 use crate::types::types::{ChainIdProofValueType, InclusionProof, SkipInputs, StepInputs};
@@ -48,8 +48,6 @@ impl Default for InputDataFetcher {
         Self::new(urls)
     }
 }
-
-const MAX_NUM_RETRIES: usize = 3;
 
 impl InputDataFetcher {
     pub fn new(urls: Vec<String>) -> Self {
@@ -227,7 +225,6 @@ impl InputDataFetcher {
     pub async fn get_step_inputs<const VALIDATOR_SET_SIZE_MAX: usize>(
         &mut self,
         prev_block_number: u64,
-        prev_header_hash: Vec<u8>,
     ) -> StepInputs {
         let prev_block_signed_header = self.get_signed_header_from_number(prev_block_number).await;
         let prev_header = prev_block_signed_header.header.clone();
@@ -306,10 +303,9 @@ impl InputDataFetcher {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{
-        types::conversion::get_validator_data_from_block,
-        verification::verification::{get_merkle_proof, verify_merkle_proof},
-    };
+    #[cfg(feature = "local-tests")]
+    use crate::types::conversion::get_validator_data_from_block;
+    use crate::verification::verification::{get_merkle_proof, verify_merkle_proof};
     use tendermint_proto::Protobuf;
 
     #[cfg(feature = "local-tests")]
