@@ -1,6 +1,8 @@
 /// The number of validators on the Tendermint chain.
 pub const VALIDATOR_SET_SIZE_MAX: usize = 100;
 
+pub const HEADER_PROOF_DEPTH: usize = 4;
+
 /// The maximum number of bytes in a protobuf-encoded chain ID. The maximum chain ID length is
 /// 50 characters + 2 bytes for the encoding prefix. Source:
 /// https://docs.tendermint.com/v0.34/tendermint-core/using-tendermint.html#fields

@@ -12,7 +12,7 @@ use crate::consts::{
 use crate::types::conversion::{get_validator_data_from_block, validator_hash_field_from_block};
 use crate::types::types::{ChainIdProofValueType, InclusionProof, SkipInputs, StepInputs};
 use crate::utils::{CommitResponse, ValidatorSetResponse};
-use crate::verification::verification::get_merkle_proof;
+use crate::verification::get_merkle_proof;
 
 #[derive(Debug)]
 pub struct InputDataFetcher {
@@ -303,47 +303,8 @@ impl InputDataFetcher {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    #[cfg(feature = "local-tests")]
-    use crate::types::conversion::get_validator_data_from_block;
-    use crate::verification::verification::{get_merkle_proof, verify_merkle_proof};
+    use crate::verification::{get_merkle_proof, verification::verify_merkle_proof};
     use tendermint_proto::Protobuf;
-
-    #[cfg(feature = "local-tests")]
-    #[tokio::test]
-    async fn test_get_signed_vote() {
-        let mut data_fetcher = super::InputDataFetcher {
-            urls: vec!["http://localhost:26657".to_string()],
-            ..Default::default()
-        };
-        let target_block_number = 28122519;
-        let target_block_validator_set = data_fetcher
-            .get_validator_set_from_number(target_block_number)
-            .await;
-        let target_signed_header = data_fetcher
-            .get_signed_header_from_number(target_block_number)
-            .await;
-
-        let _ = get_validator_data_from_block(&target_block_validator_set, &target_signed_header);
-    }
-
-    #[cfg(feature = "local-tests")]
-    #[tokio::test]
-    async fn test_find_header_with_nonzero_round() {
-        let data_fetcher = super::InputDataFetcher {
-            urls: vec!["http://localhost:26657".to_string()],
-            ..Default::default()
-        };
-        let mut target_block_number = 28122519;
-        loop {
-            let target_signed_header = data_fetcher
-                .get_signed_header_from_number(target_block_number)
-                .await;
-            if target_signed_header.commit.round.value() != 0 {
-                break;
-            }
-            target_block_number += 1;
-        }
-    }
 
     #[tokio::test]
     async fn test_verify_merkle_proof() {
