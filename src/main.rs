@@ -4,6 +4,10 @@ pub mod types;
 pub mod utils;
 pub mod verification;
 
+fn main() {
+    println!("Hello, Tendermint!");
+}
+
 #[cfg(test)]
 mod tests {
     use base64::Engine;
