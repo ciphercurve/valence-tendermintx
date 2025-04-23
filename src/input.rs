@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 
 use tendermint::block::Header;
@@ -12,12 +11,12 @@ use crate::consts::{
 };
 use crate::types::conversion::{get_validator_data_from_block, validator_hash_field_from_block};
 use crate::types::types::{ChainIdProofValueType, InclusionProof, SkipInputs, StepInputs};
-use crate::utils::{CommitResponse, Proof, ValidatorSetResponse, generate_proofs_from_header};
+use crate::utils::{CommitResponse, ValidatorSetResponse};
+use crate::verification::verification::get_merkle_proof;
 
 #[derive(Debug)]
 pub struct InputDataFetcher {
     pub urls: Vec<String>,
-    pub proof_cache: HashMap<Vec<u8>, Vec<Proof>>,
 }
 
 /// Computes the path indices for a Merkle proof based on the index and total number of leaves.
@@ -54,10 +53,7 @@ const MAX_NUM_RETRIES: usize = 3;
 
 impl InputDataFetcher {
     pub fn new(urls: Vec<String>) -> Self {
-        Self {
-            urls,
-            proof_cache: HashMap::new(),
-        }
+        Self { urls }
     }
 
     // Request data from the Tendermint RPC with quadratic backoff & multiple RPC's.
@@ -130,35 +126,13 @@ impl InputDataFetcher {
         v
     }
 
-    pub fn get_merkle_proof(
-        &mut self,
-        block_header: &Header,
-        index: u64,
-        encoded_leaf: Vec<u8>,
-    ) -> (Vec<u8>, Vec<Vec<u8>>) {
-        let hash: Vec<u8> = block_header.hash().as_bytes().try_into().unwrap();
-        let proofs = match self.proof_cache.get(&hash) {
-            Some(proofs) => proofs.clone(),
-            None => {
-                let (hash, proofs) = generate_proofs_from_header(block_header);
-                self.proof_cache.insert(hash.to_vec(), proofs.clone());
-                proofs
-            }
-        };
-        let proof = proofs[index as usize].clone();
-        (
-            encoded_leaf,
-            proof.aunts.iter().map(|a| a.to_vec()).collect(),
-        )
-    }
-
     pub fn get_inclusion_proof(
         &mut self,
         block_header: &Header,
         index: u64,
         encoded_leaf: Vec<u8>,
     ) -> InclusionProof {
-        let (leaf, proof) = self.get_merkle_proof(block_header, index, encoded_leaf);
+        let (leaf, proof) = get_merkle_proof(block_header, index, encoded_leaf);
         let path_indices = get_path_indices(index, 14); // Header has 14 fields
         InclusionProof {
             leaf: leaf.try_into().unwrap(),
@@ -195,7 +169,7 @@ impl InputDataFetcher {
         let round = target_signed_header.commit.round.value() as usize;
 
         let encoded_chain_id = target_signed_header.header().chain_id.clone().encode_vec();
-        let target_block_chain_id_proof = self.get_merkle_proof(
+        let target_block_chain_id_proof = get_merkle_proof(
             &target_signed_header.header(),
             CHAIN_ID_INDEX as u64,
             encoded_chain_id.clone(),
@@ -209,7 +183,7 @@ impl InputDataFetcher {
             proof: target_block_chain_id_proof.1,
         };
 
-        let target_block_height_proof = self.get_merkle_proof(
+        let target_block_height_proof = get_merkle_proof(
             &target_signed_header.header(),
             BLOCK_HEIGHT_INDEX as u64,
             target_signed_header.header().height.encode_vec(),
@@ -270,7 +244,7 @@ impl InputDataFetcher {
 
         let next_chain_id = next_block_signed_header.header.chain_id.clone();
 
-        let next_block_chain_id_proof = self.get_merkle_proof(
+        let next_block_chain_id_proof = get_merkle_proof(
             &next_block_signed_header.header,
             CHAIN_ID_INDEX as u64,
             next_chain_id.clone().encode_vec(),
@@ -285,7 +259,7 @@ impl InputDataFetcher {
             proof: next_block_chain_id_proof.1,
         };
 
-        let next_block_height_proof = self.get_merkle_proof(
+        let next_block_height_proof = get_merkle_proof(
             &next_block_signed_header.header,
             BLOCK_HEIGHT_INDEX as u64,
             next_block_signed_header.header.height.encode_vec(),
@@ -336,7 +310,7 @@ pub(crate) mod tests {
 
     use crate::{
         types::conversion::get_validator_data_from_block,
-        verification::verification::verify_merkle_proof,
+        verification::verification::{get_merkle_proof, verify_merkle_proof},
     };
 
     #[tokio::test]
@@ -376,14 +350,14 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_verify_merkle_proof() {
-        let mut data_fetcher = super::InputDataFetcher::default();
+        let data_fetcher = super::InputDataFetcher::default();
         let block_number = 28122519;
         let signed_header = data_fetcher
             .get_signed_header_from_number(block_number)
             .await;
         // Get the chain ID proof
         let encoded_chain_id = signed_header.header.chain_id.clone().encode_vec();
-        let (leaf, proof) = data_fetcher.get_merkle_proof(
+        let (leaf, proof) = get_merkle_proof(
             &signed_header.header,
             super::CHAIN_ID_INDEX as u64,
             encoded_chain_id.clone(),

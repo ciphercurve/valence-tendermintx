@@ -1,9 +1,12 @@
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use tendermint::block::Header;
 use tendermint_proto::Protobuf;
 
-use crate::consts::{BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES};
+use crate::consts::{
+    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES, VALIDATOR_BYTE_LENGTH_MAX,
+    VALIDATOR_SET_SIZE_MAX,
+};
 use crate::input::get_path_indices;
 use crate::types::types::{SkipInputs, StepInputs};
 use crate::utils::{Proof, generate_proofs_from_header, inner_hash, leaf_hash};
@@ -226,6 +229,37 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid next block height proof".to_string());
     }
 
+    // Marshal validators and compute validator set hash
+    let mut marshaled_validators = Vec::new();
+    let mut validator_byte_lengths = Vec::new();
+
+    for validator in &step_inputs.next_block_validators {
+        let marshaled = marshal_tendermint_validator(&validator.pubkey, &validator.voting_power);
+        validator_byte_lengths.push(marshaled.len() as u64);
+        marshaled_validators.push(marshaled);
+    }
+
+    // Pad to VALIDATOR_SET_SIZE_MAX
+    while marshaled_validators.len() < VALIDATOR_SET_SIZE_MAX {
+        marshaled_validators.push(vec![0u8; VALIDATOR_BYTE_LENGTH_MAX]);
+        validator_byte_lengths.push(VALIDATOR_BYTE_LENGTH_MAX as u64);
+    }
+
+    // Compute validator set hash
+    let computed_validators_hash = hash_validator_set::<VALIDATOR_SET_SIZE_MAX>(
+        &marshaled_validators,
+        &validator_byte_lengths,
+    );
+    println!("computed_validators_hash: {:?}", computed_validators_hash);
+    println!(
+        "step_inputs.next_header.validators_hash: {:?}",
+        step_inputs.next_header.validators_hash.as_bytes()
+    );
+    // Verify computed hash matches the header's validators hash
+    if computed_validators_hash != step_inputs.next_header.validators_hash.as_bytes() {
+        return Err("Computed validators hash does not match header's validators hash".to_string());
+    }
+
     // Verify validators hash proof
     if !verify_merkle_proof(
         next_header_hash.as_bytes().try_into().unwrap(),
@@ -314,4 +348,96 @@ pub fn get_merkle_proof(
         encoded_leaf,
         proof.aunts.iter().map(|a| a.to_vec()).collect(),
     )
+}
+
+fn marshal_int64_varint(value: u64) -> Vec<u8> {
+    let mut res = Vec::new();
+    let mut remaining = value;
+    loop {
+        let mut byte = (remaining & 0x7F) as u8;
+        remaining >>= 7;
+        if remaining > 0 {
+            byte |= 0x80;
+        }
+        res.push(byte);
+        if remaining == 0 {
+            break;
+        }
+    }
+    res
+}
+
+pub fn marshal_tendermint_validator(pubkey: &[u8], voting_power: &u64) -> Vec<u8> {
+    // The encoding is as follows in bytes: 10 34 10 32 <pubkey> 16 <varint>
+    let mut res = vec![10u8, 34u8, 10u8, 32u8];
+    res.extend_from_slice(&pubkey);
+    res.push(16u8);
+    // The remaining bytes of the serialized validator are the voting power as a "varint".
+    let voting_power_serialized = marshal_int64_varint(*voting_power);
+    res.extend_from_slice(&voting_power_serialized);
+
+    res
+}
+
+fn hash_validator_leaf(validator: &[u8], validator_byte_length: u64) -> [u8; 32] {
+    // The encoding is as follows in bytes: 0x00 || validatorBytes
+    let mut validator_bytes = vec![0u8]; // Leaf node prefix
+    validator_bytes.extend_from_slice(validator);
+    // Hash the validator bytes using SHA256, but only hash up to validator_byte_length + 1 bytes
+    // The +1 is for the prefix byte (0x00)
+    let input_byte_length = validator_byte_length + 1;
+    let mut hasher = Sha256::new();
+    hasher.update(&validator_bytes[..input_byte_length as usize]);
+    hasher.finalize().into()
+}
+
+fn hash_validator_set<const VALIDATOR_SET_SIZE_MAX: usize>(
+    validators: &[Vec<u8>],
+    validator_byte_lengths: &[u64],
+) -> [u8; 32] {
+    [0; 32]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex;
+    #[test]
+    fn test_marshal_int64_varint() {
+        // Test case 1: Small number (1 byte)
+        assert_eq!(marshal_int64_varint(1), vec![0x01]);
+        // Test case 2: Number requiring 2 bytes
+        assert_eq!(marshal_int64_varint(300), vec![0xAC, 0x02]);
+        // Test case 3: Maximum 1-byte value
+        assert_eq!(marshal_int64_varint(127), vec![0x7F]);
+        // Test case 4: Minimum 2-byte value
+        assert_eq!(marshal_int64_varint(128), vec![0x80, 0x01]);
+        // Test case 5: Large number
+        assert_eq!(
+            marshal_int64_varint(123456789),
+            vec![0x95, 0x9A, 0xEF, 0x3A]
+        );
+        // Test case 6: Maximum u64 value
+        assert_eq!(
+            marshal_int64_varint(u64::MAX),
+            vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]
+        );
+    }
+
+    #[test]
+    fn test_marshal_tendermint_validator() {
+        // This is a test case generated from a validator in block 11000 of the mocha-3 testnet.
+        let voting_power = 100010_u64;
+        let pubkey =
+            hex::decode("de25aec935b10f657b43fa97e5a8d4e523bdb0f9972605f0b064eff7b17048ba")
+                .unwrap();
+        let expected_marshal = hex::decode(
+            "0a220a20de25aec935b10f657b43fa97e5a8d4e523bdb0f9972605f0b064eff7b17048ba10aa8d06",
+        )
+        .unwrap();
+        // Marshal the validator
+        let result = marshal_tendermint_validator(&pubkey, &voting_power);
+        // Verify the marshaled output matches the expected bytes
+        assert_eq!(result, expected_marshal);
+    }
 }
