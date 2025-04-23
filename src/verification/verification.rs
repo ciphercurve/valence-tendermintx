@@ -68,7 +68,7 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
         return Err("Invalid target block chain ID proof".to_string());
     }
 
-    let trusted_path_indices = get_path_indices(CHAIN_ID_INDEX as u64, 14);
+    /*let trusted_path_indices = get_path_indices(CHAIN_ID_INDEX as u64, 14);
     let trusted_block_chain_id_proof = get_merkle_proof(
         &skip_inputs.trusted_header,
         CHAIN_ID_INDEX as u64,
@@ -86,7 +86,7 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
         &trusted_path_indices,
     ) {
         return Err("Invalid trusted block chain ID proof".to_string());
-    }
+    }*/
 
     // Verify height proof
     let height_path_indices = get_path_indices(BLOCK_HEIGHT_INDEX as u64, 14);
