@@ -5,8 +5,8 @@ use tendermint::merkle::HASH_SIZE;
 use tendermint_proto::Protobuf;
 
 use crate::consts::{
-    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, NEXT_VALIDATORS_HASH_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES,
-    VALIDATOR_BYTE_LENGTH_MAX, VALIDATOR_SET_SIZE_MAX,
+    BLOCK_HEIGHT_INDEX, CHAIN_ID_INDEX, PROTOBUF_CHAIN_ID_SIZE_BYTES, VALIDATOR_BYTE_LENGTH_MAX,
+    VALIDATOR_SET_SIZE_MAX,
 };
 use crate::input::get_path_indices;
 use crate::types::conversion::ValidatorVariable;
