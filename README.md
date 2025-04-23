@@ -18,6 +18,32 @@ This document provides a comprehensive security comparison between two implement
 
 ## Core Security Guarantees with Code Examples
 
+### 0. What is being verified
+
+*Skip Circuit*:
+- the trusted validator set against the trusted validator hash
+- validator hash proof against trusted header
+- target block signatures
+- target block chain id against header
+- target block height against header
+- the voting power
+
+>[!NOTE]
+> The Skip Circuit is special in a sense that it will assume that our
+> trusted validator set from the previous block will behave honestly
+> The assumption is that if and only if 1/3rd + of the verifier set has not changed,
+> then we continue to trust it.
+
+*Step Circuit*
+- the next valifdator set against the next validator hash
+- the previous header hash proof
+- the previous validator hash proof
+- the previous validator set against the previous validator hash
+- target block signatures
+- target block chain id against header
+- target block height against header
+- the voting power
+
 ### 1. Block Header Verification
 
 Both implementations verify block headers through Merkle proofs and ensure proper chain continuity. Here's how they compare:
