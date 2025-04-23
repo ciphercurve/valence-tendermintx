@@ -1,6 +1,6 @@
 # Valence TendermintX - A Modern Tendermint ZK Light Client
 
-> ![WARNING]
+> [!WARNING]
 > This repository contains critical infrastructure 
 > and has not been audited (yet)!
 >
