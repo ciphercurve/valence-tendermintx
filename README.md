@@ -108,10 +108,6 @@ Contributions are welcome! Please ensure:
 3. Security considerations are addressed
 4. Changes are backward compatible
 
-## License
-
-[Add your license information here]
-
 ## Acknowledgments
 
 - Inspired by Succinct's `Tendermintx`
