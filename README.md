@@ -61,7 +61,7 @@ fn verify_prev_header_next_validators_hash(
 }
 ```
 
-**Production Implementation (Runtime)**:
+**This Implementation (Runtime)**:
 ```rust
 pub fn verify_step(step_inputs: &StepInputs, prev_header_hash: Vec<u8>) -> Result<(), String> {
     // Verify the last block ID proof matches the current header
@@ -138,7 +138,7 @@ fn verify_voting_threshold<const VALIDATOR_SET_SIZE_MAX: usize>(
 }
 ```
 
-**Production Implementation (Runtime)**:
+**This Implementation (Runtime)**:
 ```rust
 pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
     let mut total_voting_power: u64 = 0;
@@ -194,7 +194,7 @@ fn verify_trusted_validators<const VALIDATOR_SET_SIZE_MAX: usize>(
 }
 ```
 
-**Production Implementation (Runtime)**:
+**This Implementation (Runtime)**:
 ```rust
 pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
     let mut signed_validators_from_trusted: u64 = 0;
@@ -230,22 +230,22 @@ Both implementations:
 
 ### 1. Circuit vs Runtime Verification
 
-The reference implementation (`verification-comparison.rs`) is implemented as a zero-knowledge circuit using Plonky2, while the production implementation (`verification.rs`) is a runtime verification system.
+The reference implementation (`verification-comparison.rs`) is implemented as a zero-knowledge circuit using Plonky2, while the This Implementation (`verification.rs`) is a runtime verification system.
 
 ### 2. Merkle Proof Handling
 
 - **Reference Implementation**: Uses a more formalized approach with explicit path indices and depth parameters
-- **Production Implementation**: Uses a more practical approach with helper functions for proof generation and verification
+- **This Implementation**: Uses a more practical approach with helper functions for proof generation and verification
 
 ### 3. Validator Set Verification
 
 - **Reference Implementation**: More strictly typed with explicit size constraints and array bounds
-- **Production Implementation**: More flexible with dynamic sizing and runtime checks
+- **This Implementation**: More flexible with dynamic sizing and runtime checks
 
 ### 4. Error Handling
 
 - **Reference Implementation**: Uses circuit assertions and boolean constraints
-- **Production Implementation**: Uses Rust's Result type with detailed error messages
+- **This Implementation**: Uses Rust's Result type with detailed error messages
 
 ## Security Considerations
 
@@ -283,6 +283,6 @@ See [main.rs](src/main.rs) for details
 
 ## Conclusion
 
-The production implementation (`verification.rs`) closely follows the security model of the reference implementation (`verification-comparison.rs`) while providing a more practical runtime verification system. The key security guarantees are preserved, though the trust model differs due to the circuit vs runtime implementation choice.
+This implementation (`verification.rs`) closely follows the security model of the reference implementation (`verification-comparison.rs`) while providing a more practical runtime verification system. The key security guarantees are preserved, though the trust model differs due to the circuit vs runtime implementation choice.
 
-The production implementation is suitable for direct verification in a trusted environment, while the reference implementation is better suited for zero-knowledge proof generation. Both implementations maintain the core security properties required for Tendermint light client verification.
+This implementation is suitable for direct verification in a trusted environment, while the reference implementation is better suited for zero-knowledge proof generation. Both implementations maintain the core security properties required for Tendermint light client verification.
