@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use tendermint::block::Header;
+use tendermint::merkle::HASH_SIZE;
 use tendermint_proto::Protobuf;
 
 use crate::consts::{
@@ -165,7 +166,7 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
     Ok(())
 }
 
-pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
+pub fn verify_step(step_inputs: &StepInputs, prev_header_hash: Vec<u8>) -> Result<(), String> {
     // verify the target validator set
     assert!(verify_validator_set(
         step_inputs.next_block_validators.clone(),
@@ -232,17 +233,13 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid next block last block ID proof".to_string());
     }
 
-    // verify the validator hash of the previous block
-    if !verify_merkle_proof(
-        step_inputs.prev_header.as_slice().try_into().unwrap(),
-        &step_inputs.prev_block_next_validators_hash_proof.leaf,
-        &step_inputs.prev_block_next_validators_hash_proof.proof,
-        &step_inputs
-            .prev_block_next_validators_hash_proof
-            .path_indices,
-    ) {
-        return Err("Invalid prev block next validators hash proof".to_string());
-    }
+    // verify the previous header
+    let prev_hash_header =
+        step_inputs.next_block_last_block_id_proof.leaf[2..2 + HASH_SIZE].to_vec();
+    assert_eq!(prev_header_hash, prev_hash_header);
+
+    // verify the previous validators hash
+    todo!("Verify that the new header contains the previous validators hash");
 
     // verify validator signatures and voting power
     let mut total_voting_power: u64 = 0;

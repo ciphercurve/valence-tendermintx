@@ -238,6 +238,11 @@ impl InputDataFetcher {
             .get_validator_set_from_number(prev_block_number + 1)
             .await;
         let nb_validators = next_block_validators.len();
+        assert!(
+            nb_validators <= VALIDATOR_SET_SIZE_MAX,
+            "The validator set size of the next block is larger than the
+            VALIDATOR_SET_SIZE_MAX."
+        );
         let next_block_validators =
             get_validator_data_from_block(&next_block_validators, &next_block_signed_header);
         let next_chain_id = next_block_signed_header.header.chain_id.clone();
@@ -287,7 +292,6 @@ impl InputDataFetcher {
 
         StepInputs {
             next_header: next_block_header,
-            prev_header: prev_header_hash,
             round,
             next_block_validators,
             nb_validators,

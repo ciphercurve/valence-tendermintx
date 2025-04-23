@@ -25,7 +25,6 @@ pub struct HeightProofValueType {
 #[derive(Debug)]
 pub struct StepInputs {
     pub next_header: Header,
-    pub prev_header: Vec<u8>,
     pub round: usize,
     pub next_block_validators: Vec<ValidatorVariable>,
     pub nb_validators: usize,
