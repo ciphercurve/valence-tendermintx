@@ -1,2 +1,2 @@
-pub mod validation;
+pub mod tree;
 pub mod verification;

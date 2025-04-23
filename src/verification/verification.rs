@@ -8,8 +8,10 @@ use crate::consts::{
     VALIDATOR_SET_SIZE_MAX,
 };
 use crate::input::get_path_indices;
+use crate::types::conversion::ValidatorVariable;
 use crate::types::types::{SkipInputs, StepInputs};
 use crate::utils::{Proof, generate_proofs_from_header, inner_hash, leaf_hash};
+use crate::verification::tree::{TendermintMerkleTree, TreeBuilder};
 
 use ed25519_dalek;
 
@@ -40,14 +42,39 @@ pub fn get_root_from_merkle_proof_hashed_leaf(
 }
 
 pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
-    // Verify chain ID consistency
+    // verify the target validator set
+    assert!(verify_validator_set(
+        skip_inputs.target_block_validators.clone(),
+        skip_inputs.nb_target_validators as u64,
+        skip_inputs
+            .target_header
+            .validators_hash
+            .as_bytes()
+            .try_into()
+            .unwrap()
+    ));
+
+    // verify the validators hash
+    if !verify_merkle_proof(
+        skip_inputs
+            .target_header
+            .hash()
+            .as_bytes()
+            .try_into()
+            .unwrap(),
+        &skip_inputs.target_block_validators_hash_proof.leaf,
+        &skip_inputs.target_block_validators_hash_proof.proof,
+        &skip_inputs.target_block_validators_hash_proof.path_indices,
+    ) {
+        return Err("Invalid target block validators hash proof".to_string());
+    }
+
+    // verify the target chain id
     if skip_inputs.target_header.chain_id != skip_inputs.trusted_header.chain_id {
         return Err(format!(
             "Chain ID mismatch between trusted block and target block"
         ));
     }
-
-    // Verify chain ID merkle proofs
     let encoded_chain_id = skip_inputs.target_header.chain_id.clone().encode_vec();
     let mut extended_chain_id = encoded_chain_id.clone();
     extended_chain_id.resize(PROTOBUF_CHAIN_ID_SIZE_BYTES, 0u8);
@@ -71,27 +98,7 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
         return Err("Invalid target block chain ID proof".to_string());
     }
 
-    /*let trusted_path_indices = get_path_indices(CHAIN_ID_INDEX as u64, 14);
-    let trusted_block_chain_id_proof = get_merkle_proof(
-        &skip_inputs.trusted_header,
-        CHAIN_ID_INDEX as u64,
-        encoded_chain_id.clone(),
-    );
-    if !verify_merkle_proof(
-        skip_inputs
-            .trusted_header
-            .hash()
-            .as_bytes()
-            .try_into()
-            .unwrap(),
-        &trusted_block_chain_id_proof.0,
-        &trusted_block_chain_id_proof.1,
-        &trusted_path_indices,
-    ) {
-        return Err("Invalid trusted block chain ID proof".to_string());
-    }*/
-
-    // Verify height proof
+    // verify the target block height
     let height_path_indices = get_path_indices(BLOCK_HEIGHT_INDEX as u64, 14);
     if !verify_merkle_proof(
         skip_inputs
@@ -107,46 +114,15 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
         return Err("Invalid target block height proof".to_string());
     }
 
-    // Verify validators hash proofs
-    if !verify_merkle_proof(
-        skip_inputs
-            .target_header
-            .hash()
-            .as_bytes()
-            .try_into()
-            .unwrap(),
-        &skip_inputs.target_block_validators_hash_proof.leaf,
-        &skip_inputs.target_block_validators_hash_proof.proof,
-        &skip_inputs.target_block_validators_hash_proof.path_indices,
-    ) {
-        return Err("Invalid target block validators hash proof".to_string());
-    }
-
-    if !verify_merkle_proof(
-        skip_inputs
-            .trusted_header
-            .hash()
-            .as_bytes()
-            .try_into()
-            .unwrap(),
-        &skip_inputs.trusted_block_validators_hash_proof.leaf,
-        &skip_inputs.trusted_block_validators_hash_proof.proof,
-        &skip_inputs.trusted_block_validators_hash_proof.path_indices,
-    ) {
-        return Err("Invalid trusted block validators hash proof".to_string());
-    }
-
     // Verify validator signatures and voting power
     let mut total_voting_power: u64 = 0;
     let mut signed_voting_power: u64 = 0;
     let mut signed_validators_from_trusted: u64 = 0;
-
     let trusted_validator_addresses: std::collections::HashSet<_> = skip_inputs
         .trusted_block_validators_hash_fields
         .iter()
         .map(|v| v.pubkey.clone())
         .collect();
-
     for validator in &skip_inputs.target_block_validators {
         if validator.signed {
             let message = &validator.message[..validator.message_byte_length as usize];
@@ -171,16 +147,14 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
         }
         total_voting_power += validator.voting_power;
     }
-
-    // Verify more than 2/3 of voting power signed
+    // more than 2/3 total votes
     if signed_voting_power * 3 <= total_voting_power * 2 {
         return Err(format!(
             "Insufficient voting power signed the target block. Got {}/{} voting power",
             signed_voting_power, total_voting_power
         ));
     }
-
-    // Verify that 1/3rd or more of the validators that signed the target block were the same validators as in the trusted block
+    // more than 1/3 trusted votes
     if signed_validators_from_trusted * 3 < signed_voting_power {
         return Err(format!(
             "Insufficient validators from trusted block signed the target block. Got {}/{} voting power from trusted validators",
@@ -192,7 +166,28 @@ pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
 }
 
 pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
-    // Verify chain ID merkle proofs
+    // verify the target validator set
+    assert!(verify_validator_set(
+        step_inputs.next_block_validators.clone(),
+        step_inputs.nb_validators as u64,
+        step_inputs
+            .next_header
+            .validators_hash
+            .as_bytes()
+            .try_into()
+            .unwrap()
+    ));
+    let next_header_hash = step_inputs.next_header.hash();
+    if !verify_merkle_proof(
+        next_header_hash.as_bytes().try_into().unwrap(),
+        &step_inputs.next_block_validators_hash_proof.leaf,
+        &step_inputs.next_block_validators_hash_proof.proof,
+        &step_inputs.next_block_validators_hash_proof.path_indices,
+    ) {
+        return Err("Invalid next block validators hash proof".to_string());
+    }
+
+    // verify target chain id
     let encoded_chain_id = step_inputs.next_header.chain_id.clone().encode_vec();
     let mut extended_chain_id = encoded_chain_id.clone();
     extended_chain_id.resize(PROTOBUF_CHAIN_ID_SIZE_BYTES, 0u8);
@@ -216,9 +211,7 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid target block chain ID proof".to_string());
     }
 
-    let next_header_hash = step_inputs.next_header.hash();
-
-    // Verify height proof
+    // verify next block height
     let height_path_indices = get_path_indices(BLOCK_HEIGHT_INDEX as u64, 14);
     if !verify_merkle_proof(
         next_header_hash.as_bytes().try_into().unwrap(),
@@ -229,44 +222,7 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid next block height proof".to_string());
     }
 
-    // Marshal validators and compute validator set hash
-    let mut marshaled_validators = Vec::new();
-    let mut validator_byte_lengths = Vec::new();
-
-    for validator in &step_inputs.next_block_validators {
-        let marshaled = marshal_tendermint_validator(&validator.pubkey, &validator.voting_power);
-        validator_byte_lengths.push(marshaled.len() as u64);
-        marshaled_validators.push(marshaled);
-    }
-
-    // Pad to VALIDATOR_SET_SIZE_MAX
-    while marshaled_validators.len() < VALIDATOR_SET_SIZE_MAX {
-        marshaled_validators.push(vec![0u8; VALIDATOR_BYTE_LENGTH_MAX]);
-        validator_byte_lengths.push(VALIDATOR_BYTE_LENGTH_MAX as u64);
-    }
-
-    // Compute validator set hash
-    let computed_validators_hash = hash_validator_set::<VALIDATOR_SET_SIZE_MAX>(
-        &marshaled_validators,
-        &validator_byte_lengths,
-        step_inputs.nb_validators as u64,
-    );
-    // Verify computed hash matches the header's validators hash
-    if computed_validators_hash != step_inputs.next_header.validators_hash.as_bytes() {
-        return Err("Computed validators hash does not match header's validators hash".to_string());
-    }
-
-    // Verify validators hash proof
-    if !verify_merkle_proof(
-        next_header_hash.as_bytes().try_into().unwrap(),
-        &step_inputs.next_block_validators_hash_proof.leaf,
-        &step_inputs.next_block_validators_hash_proof.proof,
-        &step_inputs.next_block_validators_hash_proof.path_indices,
-    ) {
-        return Err("Invalid next block validators hash proof".to_string());
-    }
-
-    // Verify last block ID proof
+    // verify the last block id in the next block
     if !verify_merkle_proof(
         next_header_hash.as_bytes().try_into().unwrap(),
         &step_inputs.next_block_last_block_id_proof.leaf,
@@ -276,7 +232,7 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid next block last block ID proof".to_string());
     }
 
-    // Verify prev block's next validators hash proof
+    // verify the validator hash of the previous block
     if !verify_merkle_proof(
         step_inputs.prev_header.as_slice().try_into().unwrap(),
         &step_inputs.prev_block_next_validators_hash_proof.leaf,
@@ -288,10 +244,9 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         return Err("Invalid prev block next validators hash proof".to_string());
     }
 
-    // Verify validator signatures and voting power
+    // verify validator signatures and voting power
     let mut total_voting_power: u64 = 0;
     let mut signed_voting_power: u64 = 0;
-
     for validator in &step_inputs.next_block_validators {
         if validator.signed {
             let message = &validator.message[..validator.message_byte_length as usize];
@@ -312,8 +267,7 @@ pub fn verify_step(step_inputs: &StepInputs) -> Result<(), String> {
         }
         total_voting_power += validator.voting_power;
     }
-
-    // Verify more than 2/3 of voting power signed
+    // more than 2/3 total votes
     if signed_voting_power * 3 <= total_voting_power * 2 {
         return Err(format!(
             "Insufficient voting power signed the next block. Got {}/{} voting power",
@@ -394,208 +348,11 @@ fn hash_validator_set<const VALIDATOR_SET_SIZE_MAX: usize>(
     }
     assert_eq!(validators.len(), VALIDATOR_SET_SIZE_MAX);
     assert_eq!(validator_byte_lengths.len(), VALIDATOR_SET_SIZE_MAX);
-    let mut circuit_builder = CircuitBuilder {};
-    circuit_builder.get_root_from_hashed_leaves::<100>(
+    let mut circuit_builder = TreeBuilder {};
+    circuit_builder.get_root_from_hashed_leaves::<VALIDATOR_SET_SIZE_MAX>(
         validator_leaf_hashes.iter().map(|x| x.to_vec()).collect(),
         enabled_validators,
     )
-}
-
-struct CircuitBuilder {}
-
-pub trait TendermintMerkleTree {
-    fn get_root_from_merkle_proof_hashed_leaf<const PROOF_DEPTH: usize>(
-        &mut self,
-        proof: &Vec<Vec<u8>>,
-        path_indices: &Vec<bool>,
-        leaf: Vec<u8>,
-    ) -> Vec<u8>;
-
-    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize, const LEAF_SIZE_BYTES: usize>(
-        &mut self,
-        inclusion_proof: &MerkleInclusionProofVariable,
-        path_indices: Vec<bool>,
-    ) -> Vec<u8>;
-
-    fn leaf_hash(&mut self, leaf: &[u8]) -> Vec<u8>;
-
-    fn inner_hash(&mut self, left: &[u8], right: &[u8]) -> Vec<u8>;
-
-    fn hash_merkle_layer(
-        &mut self,
-        merkle_hashes: Vec<Vec<u8>>,
-        merkle_hash_enabled: Vec<bool>,
-    ) -> (Vec<Vec<u8>>, Vec<bool>);
-
-    fn hash_leaves<const LEAF_SIZE_BYTES: usize>(&mut self, leaves: Vec<Vec<u8>>) -> Vec<Vec<u8>>;
-
-    fn get_root_from_hashed_leaves<const MAX_NB_LEAVES: usize>(
-        &mut self,
-        leaf_hashes: Vec<Vec<u8>>,
-        nb_enabled_leaves: u64,
-    ) -> Vec<u8>;
-
-    fn compute_root_from_leaves<const MAX_NB_LEAVES: usize, const LEAF_SIZE_BYTES: usize>(
-        &mut self,
-        leaves: Vec<Vec<u8>>,
-        nb_enabled_leaves: u64,
-    ) -> Vec<u8>;
-}
-
-/// Merkle Tree implementation for the Tendermint spec (follows Comet BFT Simple Merkle Tree spec: https://docs.cometbft.com/main/spec/core/encoding#merkle-trees).
-/// Adds pre-image prefix of 0x01 to inner nodes and 0x00 to leaf nodes for second pre-image resistance.
-/// Computed root hash is independent of the number of empty leaves, unlike the simple Merkle Tree.
-impl TendermintMerkleTree for CircuitBuilder {
-    /// Leaf should already be hashed.
-    fn get_root_from_merkle_proof_hashed_leaf<const PROOF_DEPTH: usize>(
-        &mut self,
-        proof: &Vec<Vec<u8>>,
-        path_indices: &Vec<bool>,
-        leaf: Vec<u8>,
-    ) -> Vec<u8> {
-        let mut hash_so_far = leaf;
-        for i in 0..PROOF_DEPTH {
-            let aunt = proof[i].clone();
-            let path_index = path_indices[i];
-            let left_hash_pair = self.inner_hash(&hash_so_far, &aunt);
-            let right_hash_pair = self.inner_hash(&aunt, &hash_so_far);
-            if path_index {
-                hash_so_far = right_hash_pair;
-            } else {
-                hash_so_far = left_hash_pair;
-            }
-        }
-        hash_so_far
-    }
-
-    fn get_root_from_merkle_proof<const PROOF_DEPTH: usize, const LEAF_SIZE_BYTES: usize>(
-        &mut self,
-        inclusion_proof: &MerkleInclusionProofVariable,
-        path_indices: Vec<bool>,
-    ) -> Vec<u8> {
-        let hashed_leaf = self.leaf_hash(&inclusion_proof.leaf);
-
-        self.get_root_from_merkle_proof_hashed_leaf::<PROOF_DEPTH>(
-            &inclusion_proof.proof,
-            &path_indices,
-            hashed_leaf,
-        )
-    }
-
-    fn leaf_hash(&mut self, leaf: &[u8]) -> Vec<u8> {
-        // Leaf node pre-image is 0x00 || leaf.
-        let zero_byte = 0u8;
-
-        let mut encoded_leaf = vec![zero_byte];
-
-        // Append the leaf bytes to the zero byte.
-        encoded_leaf.extend(leaf.to_vec());
-
-        // Load the output of the hash.
-        let mut hasher = Sha256::new();
-        hasher.update(&encoded_leaf);
-        hasher.finalize().to_vec()
-    }
-
-    fn inner_hash(&mut self, left: &[u8], right: &[u8]) -> Vec<u8> {
-        // Inner node pre-image is 0x01 || left || right.
-        let one_byte = 1u8;
-
-        let mut encoded_leaf = vec![one_byte];
-
-        // Append the left bytes to the one byte.
-        encoded_leaf.extend(left);
-
-        // Append the right bytes to the bytes so far.
-        encoded_leaf.extend(right);
-        let mut hasher = Sha256::new();
-        hasher.update(&encoded_leaf);
-        hasher.finalize().to_vec()
-    }
-
-    fn hash_merkle_layer(
-        &mut self,
-        merkle_hashes: Vec<Vec<u8>>,
-        merkle_hash_enabled: Vec<bool>,
-    ) -> (Vec<Vec<u8>>, Vec<bool>) {
-        let zero = false;
-        let one = true;
-        let mut new_merkle_hashes = Vec::new();
-        let mut new_merkle_hash_enabled = Vec::new();
-        for i in (0..merkle_hashes.len()).step_by(2) {
-            let both_nodes_enabled = merkle_hash_enabled[i] && merkle_hash_enabled[i + 1];
-            let first_node_disabled = !merkle_hash_enabled[i];
-            let second_node_disabled = !merkle_hash_enabled[i + 1];
-            let both_nodes_disabled = first_node_disabled && second_node_disabled;
-            // Calculuate the inner hash.
-            let inner_hash = self.inner_hash(&merkle_hashes[i], &merkle_hashes[i + 1]);
-            if both_nodes_enabled {
-                new_merkle_hashes.push(inner_hash);
-            } else {
-                new_merkle_hashes.push(merkle_hashes[i].clone());
-            }
-            // Set the inner node one level up to disabled if both nodes are disabled.
-            if both_nodes_disabled {
-                new_merkle_hash_enabled.push(zero);
-            } else {
-                new_merkle_hash_enabled.push(one);
-            }
-        }
-
-        // Return the hashes and enabled nodes for the next layer up.
-        (new_merkle_hashes, new_merkle_hash_enabled)
-    }
-
-    fn hash_leaves<const LEAF_SIZE_BYTES: usize>(&mut self, leaves: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
-        leaves.iter().map(|leaf| self.leaf_hash(&leaf)).collect()
-    }
-
-    fn get_root_from_hashed_leaves<const MAX_NB_LEAVES: usize>(
-        &mut self,
-        leaf_hashes: Vec<Vec<u8>>,
-        nb_enabled_leaves: u64,
-    ) -> Vec<u8> {
-        let empty_bytes = &[0u8; 32];
-
-        // Extend leaf_hashes to be a power of 2.
-        let padded_nb_leaves = 2_u32.pow(log2_ceil_usize(MAX_NB_LEAVES) as u32);
-        assert!(padded_nb_leaves >= MAX_NB_LEAVES as u32 && padded_nb_leaves.is_power_of_two());
-
-        // Hash each of the validators to get their corresponding leaf hash.
-        // Pad the leaves to be a power of 2.
-        let mut current_nodes = leaf_hashes;
-        current_nodes.resize(padded_nb_leaves as usize, empty_bytes.to_vec());
-        // Whether to treat the validator as empty.
-        // Pad the enabled array to be a power of 2.
-        let mut current_node_enabled = Vec::new();
-        let mut is_enabled = true;
-        for i in 0..padded_nb_leaves {
-            // If at_end, then the rest of the leaves (including this one) are disabled.
-            let at_end = i as u64 == nb_enabled_leaves;
-            let not_at_end = !at_end;
-            is_enabled = not_at_end && is_enabled;
-
-            current_node_enabled.push(is_enabled);
-        }
-
-        // Hash each layer of nodes to get the root according to the Tendermint spec, starting from the leaves.
-        while current_nodes.len() > 1 {
-            (current_nodes, current_node_enabled) =
-                self.hash_merkle_layer(current_nodes, current_node_enabled);
-        }
-
-        // Return the root hash.
-        current_nodes[0].clone()
-    }
-
-    fn compute_root_from_leaves<const MAX_NB_LEAVES: usize, const LEAF_SIZE_BYTES: usize>(
-        &mut self,
-        leaves: Vec<Vec<u8>>,
-        nb_enabled_leaves: u64,
-    ) -> Vec<u8> {
-        let hashed_leaves = self.hash_leaves::<LEAF_SIZE_BYTES>(leaves);
-        self.get_root_from_hashed_leaves::<MAX_NB_LEAVES>(hashed_leaves, nb_enabled_leaves)
-    }
 }
 
 #[cfg(test)]
@@ -663,4 +420,35 @@ pub fn log2_ceil_usize(x: usize) -> usize {
     }
 
     result as usize
+}
+
+pub fn verify_validator_set(
+    validators: Vec<ValidatorVariable>,
+    nb_validators: u64,
+    root: Vec<u8>,
+) -> bool {
+    // Marshal validators and compute validator set hash
+    let mut marshaled_validators = Vec::new();
+    let mut validator_byte_lengths = Vec::new();
+
+    for validator in validators.clone() {
+        let marshaled = marshal_tendermint_validator(&validator.pubkey, &validator.voting_power);
+        validator_byte_lengths.push(marshaled.len() as u64);
+        marshaled_validators.push(marshaled);
+    }
+
+    // Pad to VALIDATOR_SET_SIZE_MAX
+    while marshaled_validators.len() < VALIDATOR_SET_SIZE_MAX {
+        marshaled_validators.push(vec![0u8; VALIDATOR_BYTE_LENGTH_MAX]);
+        validator_byte_lengths.push(VALIDATOR_BYTE_LENGTH_MAX as u64);
+    }
+
+    // Compute validator set hash
+    let computed_validators_hash = hash_validator_set::<VALIDATOR_SET_SIZE_MAX>(
+        &marshaled_validators,
+        &validator_byte_lengths,
+        nb_validators,
+    );
+
+    computed_validators_hash == root
 }
