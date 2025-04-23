@@ -9,7 +9,7 @@ use crate::consts::{
     VALIDATOR_SET_SIZE_MAX,
 };
 use crate::input::get_path_indices;
-use crate::types::conversion::ValidatorVariable;
+use crate::types::conversion::{ValidatorHashFieldVariable, ValidatorVariable};
 use crate::types::types::{SkipInputs, StepInputs};
 use crate::utils::{Proof, generate_proofs_from_header, inner_hash, leaf_hash};
 use crate::verification::tree::{TendermintMerkleTree, TreeBuilder};
@@ -42,7 +42,39 @@ pub fn get_root_from_merkle_proof_hashed_leaf(
     hash_so_far
 }
 
-pub fn verify_skip(skip_inputs: &SkipInputs) -> Result<(), String> {
+pub fn verify_skip(skip_inputs: &SkipInputs, trusted_header_hash: Vec<u8>) -> Result<(), String> {
+    // verify the trusted validator set
+    let mut tree_builder = TreeBuilder {};
+    let header_from_validator_root_proof = tree_builder
+        .get_root_from_merkle_proof::<HEADER_PROOF_DEPTH>(
+            &MerkleInclusionProofVariable {
+                proof: skip_inputs
+                    .trusted_block_validators_hash_proof
+                    .proof
+                    .clone(),
+                leaf: skip_inputs.trusted_block_validators_hash_proof.leaf.clone(),
+            },
+            skip_inputs
+                .trusted_block_validators_hash_proof
+                .path_indices
+                .clone(),
+        );
+
+    // Ensure the trusted validator hash proof aligns with the trusted header.
+    assert_eq!(header_from_validator_root_proof, trusted_header_hash);
+
+    // Calculate the validators hash of the trusted block using the provided fields.
+    let computed_val_hash = compute_validators_hash::<VALIDATOR_SET_SIZE_MAX>(
+        &skip_inputs.trusted_block_validators_hash_fields,
+        skip_inputs.nb_trusted_validators as u64,
+    );
+
+    // Extract the expected trusted validators hash from the valid validators hash proof.
+    let expected_val_hash =
+        skip_inputs.trusted_block_validators_hash_proof.leaf[2..2 + HASH_SIZE].to_vec();
+
+    // Confirm the computed validators hash matches the expected hash.
+    assert_eq!(computed_val_hash, expected_val_hash);
     // verify the target validator set
     assert!(verify_validator_set(
         skip_inputs.target_block_validators.clone(),
@@ -492,4 +524,23 @@ fn get_path_to_leaf(index: usize) -> Vec<bool> {
         curr_idx /= 2;
     }
     path
+}
+
+fn compute_validators_hash<const VALIDATOR_SET_SIZE_MAX: usize>(
+    validators: &Vec<ValidatorHashFieldVariable>,
+    nb_enabled_validators: u64,
+) -> Vec<u8> {
+    // Extract the necessary fields.
+    let byte_lengths: Vec<u64> = validators.iter().map(|v| v.validator_byte_length).collect();
+    let marshalled_validators: Vec<Vec<u8>> = validators
+        .iter()
+        .map(|v| marshal_tendermint_validator(&v.pubkey, &v.voting_power))
+        .collect();
+
+    // Compute the validators hash of the validator set.
+    hash_validator_set::<VALIDATOR_SET_SIZE_MAX>(
+        &marshalled_validators,
+        &byte_lengths,
+        nb_enabled_validators,
+    )
 }

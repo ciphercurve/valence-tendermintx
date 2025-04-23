@@ -51,6 +51,6 @@ mod tests {
                 target_height,
             )
             .await;
-        verify_skip(&skip_inputs).unwrap();
+        verify_skip(&skip_inputs, trusted_header.to_vec()).unwrap();
     }
 }
