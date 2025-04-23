@@ -387,7 +387,7 @@ fn hash_validator_leaf(validator: &[u8], validator_byte_length: u64) -> [u8; 32]
     // The +1 is for the prefix byte (0x00)
     let input_byte_length = validator_byte_length + 1;
     let mut hasher = Sha256::new();
-    hasher.update(&validator_bytes[..input_byte_length as usize]);
+    hasher.update(&validator_bytes); //&validator_bytes[..input_byte_length as usize]);
     hasher.finalize().into()
 }
 
@@ -395,6 +395,14 @@ fn hash_validator_set<const VALIDATOR_SET_SIZE_MAX: usize>(
     validators: &[Vec<u8>],
     validator_byte_lengths: &[u64],
 ) -> [u8; 32] {
+    let mut validator_leaf_hashes = Vec::new();
+    for i in 0..VALIDATOR_SET_SIZE_MAX {
+        validator_leaf_hashes.push(hash_validator_leaf(
+            &validators[i],
+            validator_byte_lengths[i],
+        ))
+    }
+    println!("validator_leaf_hashes: {:?}", validator_leaf_hashes);
     [0; 32]
 }
 
