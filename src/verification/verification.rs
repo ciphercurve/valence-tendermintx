@@ -44,6 +44,18 @@ pub fn get_root_from_merkle_proof_hashed_leaf(
 }
 
 pub fn verify_skip(skip_inputs: &SkipInputs, trusted_header_hash: Vec<u8>) -> Result<(), String> {
+    // verify the target validator set
+    assert!(verify_validator_set(
+        skip_inputs.target_block_validators.clone(),
+        skip_inputs.nb_target_validators as u64,
+        skip_inputs
+            .target_header
+            .validators_hash
+            .as_bytes()
+            .try_into()
+            .unwrap()
+    ));
+
     // verify the trusted validator hash against the header
     let mut tree_builder = TreeBuilder {};
     let header_from_validator_root_proof = tree_builder
@@ -174,7 +186,7 @@ pub fn verify_skip(skip_inputs: &SkipInputs, trusted_header_hash: Vec<u8>) -> Re
 }
 
 pub fn verify_step(step_inputs: &StepInputs, prev_header_hash: Vec<u8>) -> Result<(), String> {
-    // verify the target validator set
+    // verify the next validator set
     assert!(verify_validator_set(
         step_inputs.next_block_validators.clone(),
         step_inputs.nb_validators as u64,
